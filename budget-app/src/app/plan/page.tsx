@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { ensureDb } from "@/lib/db/ensure-ready";
 import { getMonth, getBudgetLinesForMonth, getAvailableMonths } from "@/lib/db/queries/months";
 import { getActiveCategories } from "@/lib/db/queries/categories";
-import { getActiveGroups } from "@/lib/db/queries/groups";
+import { getAllGroups } from "@/lib/db/queries/groups";
 import { nextMonth, currentMonth } from "@/lib/format";
 import { PlanClient } from "@/components/plan/plan-client";
 
@@ -32,7 +32,9 @@ export default async function PlanPage({
 
   const lines = getBudgetLinesForMonth(selected);
   const categories = getActiveCategories();
-  const groups = getActiveGroups();
+  // All groups, not just active ones: a budget line can belong to a category
+  // whose group was later archived, and it must still get a section here.
+  const groups = getAllGroups();
   const next = nextMonth(selected);
 
   return (

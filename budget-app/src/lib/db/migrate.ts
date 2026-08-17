@@ -8,57 +8,75 @@ const DB_PATH = process.env.BUDGET_DB_PATH ?? path.join(process.cwd(), "data", "
 type Sqlite = InstanceType<typeof Database>;
 
 /** Rebuilds `categories` with a group_id FK. SQLite cannot drop a CHECK constraint,
- *  so the table is recreated by the standard copy-drop-rename procedure. */
+ *  so the table is recreated by the standard copy-drop-rename procedure.
+ *  Schema-change + validation only — transaction, version stamp and the
+ *  foreign_keys toggle around it are `runMigration`'s job, not this function's,
+ *  so that a thrown error here always leaves the database exactly as it was. */
 function migration001CategoryGroups(sqlite: Sqlite) {
   const countCategories = () =>
     (sqlite.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }).n;
 
+  const before = countCategories();
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS category_groups (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL UNIQUE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      archived_at TEXT
+    );
+
+    INSERT OR IGNORE INTO category_groups (name, sort_order) VALUES
+      ('Living expenses', 1), ('Subscriptions', 2), ('Regular expenses', 3), ('Miscellaneous', 4);
+
+    CREATE TABLE categories_new (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL UNIQUE,
+      kind        TEXT NOT NULL CHECK (kind IN ('need','want','save')),
+      group_id    INTEGER NOT NULL REFERENCES category_groups(id),
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      archived_at TEXT
+    );
+
+    INSERT INTO categories_new (id, name, kind, group_id, sort_order, archived_at)
+    SELECT c.id, c.name, c.kind, g.id, c.sort_order, c.archived_at
+    FROM categories c
+    JOIN category_groups g ON g.name = CASE c.block
+      WHEN 'living'        THEN 'Living expenses'
+      WHEN 'subscriptions' THEN 'Subscriptions'
+      WHEN 'regular'       THEN 'Regular expenses'
+      ELSE                      'Miscellaneous'
+    END;
+
+    DROP TABLE categories;
+    ALTER TABLE categories_new RENAME TO categories;
+
+    CREATE INDEX IF NOT EXISTS ix_cat_group ON categories(group_id);
+  `);
+
+  const after = countCategories();
+  if (after !== before) throw new Error(`migration 001: category count changed ${before} → ${after}`);
+  const orphans = sqlite.prepare("PRAGMA foreign_key_check").all();
+  if (orphans.length) throw new Error(`migration 001: ${orphans.length} orphaned rows after rebuild`);
+}
+
+type Migration = { version: number; up: (sqlite: Sqlite) => void };
+
+const MIGRATIONS: Migration[] = [
+  { version: 1, up: migration001CategoryGroups },
+];
+const LATEST_VERSION = MIGRATIONS.length;
+
+/** Runs one migration's schema change and its version stamp inside a single
+ *  transaction, so a crash or thrown error between "schema changed" and
+ *  "version recorded" is impossible: either both happened, or neither did.
+ *  Exported so tests can prove the atomicity with a deliberately-failing migration. */
+export function runMigration(sqlite: Sqlite, migration: Migration) {
   // foreign_keys cannot be toggled inside a transaction, so it goes around it.
   sqlite.pragma("foreign_keys = OFF");
   try {
-    const before = countCategories();
     sqlite.exec("BEGIN");
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS category_groups (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        name        TEXT NOT NULL UNIQUE,
-        sort_order  INTEGER NOT NULL DEFAULT 0,
-        archived_at TEXT
-      );
-
-      INSERT OR IGNORE INTO category_groups (name, sort_order) VALUES
-        ('Living expenses', 1), ('Subscriptions', 2), ('Regular expenses', 3), ('Miscellaneous', 4);
-
-      CREATE TABLE categories_new (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        name        TEXT NOT NULL UNIQUE,
-        kind        TEXT NOT NULL CHECK (kind IN ('need','want','save')),
-        group_id    INTEGER NOT NULL REFERENCES category_groups(id),
-        sort_order  INTEGER NOT NULL DEFAULT 0,
-        archived_at TEXT
-      );
-
-      INSERT INTO categories_new (id, name, kind, group_id, sort_order, archived_at)
-      SELECT c.id, c.name, c.kind, g.id, c.sort_order, c.archived_at
-      FROM categories c
-      JOIN category_groups g ON g.name = CASE c.block
-        WHEN 'living'        THEN 'Living expenses'
-        WHEN 'subscriptions' THEN 'Subscriptions'
-        WHEN 'regular'       THEN 'Regular expenses'
-        ELSE                      'Miscellaneous'
-      END;
-
-      DROP TABLE categories;
-      ALTER TABLE categories_new RENAME TO categories;
-
-      CREATE INDEX IF NOT EXISTS ix_cat_group ON categories(group_id);
-    `);
-
-    const after = countCategories();
-    if (after !== before) throw new Error(`migration 001: category count changed ${before} → ${after}`);
-    const orphans = sqlite.prepare("PRAGMA foreign_key_check").all();
-    if (orphans.length) throw new Error(`migration 001: ${orphans.length} orphaned rows after rebuild`);
-
+    migration.up(sqlite);
+    sqlite.pragma(`user_version = ${migration.version}`);
     sqlite.exec("COMMIT");
   } catch (err) {
     sqlite.exec("ROLLBACK");
@@ -68,18 +86,10 @@ function migration001CategoryGroups(sqlite: Sqlite) {
   }
 }
 
-const MIGRATIONS: { version: number; up: (sqlite: Sqlite) => void }[] = [
-  { version: 1, up: migration001CategoryGroups },
-];
-const LATEST_VERSION = MIGRATIONS.length;
-
 function applyMigrations(sqlite: Sqlite) {
   const current = sqlite.pragma("user_version", { simple: true }) as number;
   for (const migration of MIGRATIONS) {
-    if (migration.version > current) {
-      migration.up(sqlite);
-      sqlite.pragma(`user_version = ${migration.version}`);
-    }
+    if (migration.version > current) runMigration(sqlite, migration);
   }
 }
 
@@ -94,7 +104,7 @@ export function migrateAndSeed() {
 
   if (!isNewDatabase) applyMigrations(sqlite);
 
-  sqlite.exec(`
+  const ddl = `
     CREATE TABLE IF NOT EXISTS category_groups (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL UNIQUE,
@@ -152,9 +162,26 @@ export function migrateAndSeed() {
       hit_count    INTEGER NOT NULL DEFAULT 1,
       last_used_on TEXT NOT NULL
     );
-  `);
+  `;
 
-  if (isNewDatabase) sqlite.pragma(`user_version = ${LATEST_VERSION}`);
+  // A brand-new database: the DDL statements auto-commit one by one, so without
+  // an explicit transaction a crash mid-way would leave a new-shape `categories`
+  // at version 0 — indistinguishable from a legacy database, and fed to a
+  // migration that fails on a `block` column that was never there. Wrap the DDL
+  // and its version stamp together so that never happens.
+  if (isNewDatabase) {
+    sqlite.exec("BEGIN");
+    try {
+      sqlite.exec(ddl);
+      sqlite.pragma(`user_version = ${LATEST_VERSION}`);
+      sqlite.exec("COMMIT");
+    } catch (err) {
+      sqlite.exec("ROLLBACK");
+      throw err;
+    }
+  } else {
+    sqlite.exec(ddl);
+  }
 
   const insertGroup = sqlite.prepare(
     "INSERT OR IGNORE INTO category_groups (name, sort_order) VALUES (?, ?)"

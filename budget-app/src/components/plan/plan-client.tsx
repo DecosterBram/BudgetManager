@@ -355,6 +355,9 @@ export function PlanClient({
         const available = categories.filter(
           (c) => c.groupId === group.id && !usedIds.has(c.id)
         );
+        // Nothing to show and nothing to add — true for an archived group once its
+        // lines are gone, since an active category can never sit in an archived group.
+        if (!groupDrafts.length && !available.length) return null;
 
         return (
           <div key={group.id} style={{ marginBottom: 24 }}>

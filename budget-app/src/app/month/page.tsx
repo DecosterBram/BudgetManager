@@ -4,7 +4,7 @@ import { ensureDb } from "@/lib/db/ensure-ready";
 import { getMonth, getBudgetLinesForMonth, getAvailableMonths } from "@/lib/db/queries/months";
 import { getTransactionsForMonth } from "@/lib/db/queries/transactions";
 import { getActiveCategories } from "@/lib/db/queries/categories";
-import { getActiveGroups } from "@/lib/db/queries/groups";
+import { getAllGroups } from "@/lib/db/queries/groups";
 import { formatAmount, formatMonth, formatDate } from "@/lib/format";
 import { BudgetBar } from "@/components/budget/budget-bar";
 import { MonthTransactionList } from "@/components/month/transaction-list";
@@ -34,7 +34,9 @@ export default async function MonthPage({
   const lines      = getBudgetLinesForMonth(CURRENT_MONTH);
   const txs        = getTransactionsForMonth(CURRENT_MONTH);
   const categories = getActiveCategories();
-  const groups     = getActiveGroups();
+  // All groups, not just active ones: a budget line can belong to a category
+  // whose group was later archived, and it must still get a section here.
+  const groups     = getAllGroups();
 
   // Financials
   const saveAlloc     = Math.round(month.incomeActualCents * month.pctSave);
