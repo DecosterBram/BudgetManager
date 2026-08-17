@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/bramdecoster/Documents/Personal/personal_budget/budget-app && ls docs 2>/dev/null; ls ../docs; grep -rn \"CATEGORIES\\\\|GOALS\" src --include=*.tsx --include=*.ts -l)",
+      "Read(//Users/bramdecoster/Documents/Personal/**)",
+      "Bash(npm pkg *)",
+      "Bash(npx vitest *)",
+      "Bash(python3 -)"
+    ]
+  }
+}
