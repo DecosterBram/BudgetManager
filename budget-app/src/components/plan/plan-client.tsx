@@ -6,12 +6,12 @@ import { formatAmount, formatMonth, parseAmount } from "@/lib/format";
 import { planTotals, type PlanKind } from "@/lib/plan-totals";
 import { savePlan, generateNextMonth } from "@/lib/actions/months";
 
-const BLOCKS = [
-  { key: "living",        label: "Living expenses" },
-  { key: "subscriptions", label: "Subscriptions" },
-  { key: "regular",       label: "Regular expenses" },
-  { key: "misc",          label: "Miscellaneous" },
-] as const;
+type Group = {
+  id: number;
+  name: string;
+  sortOrder: number;
+  archivedAt: string | null;
+};
 
 type Month = {
   month: string;
@@ -31,7 +31,7 @@ type Line = {
   spentCents: number;
   categoryName: string;
   categoryKind: string;
-  categoryBlock: string;
+  categoryGroupId: number;
   categoryOrder: number;
 };
 
@@ -39,7 +39,7 @@ type Category = {
   id: number;
   name: string;
   kind: PlanKind;
-  block: string;
+  groupId: number;
   sortOrder: number;
   archivedAt: string | null;
 };
@@ -103,12 +103,14 @@ export function PlanClient({
   month,
   lines,
   categories,
+  groups,
   nextMonth,
   nextMonthExists,
 }: {
   month: Month;
   lines: Line[];
   categories: Category[];
+  groups: Group[];
   nextMonth: string;
   nextMonthExists: boolean;
 }) {
@@ -133,7 +135,7 @@ export function PlanClient({
   const [drafts, setDrafts] = useState<Draft[]>(() =>
     lines.map((l) => ({ categoryId: l.categoryId, raw: toRaw(l.plannedCents) }))
   );
-  const [addingBlock, setAddingBlock] = useState<string | null>(null);
+  const [addingGroupId, setAddingGroupId] = useState<number | null>(null);
   const [focusOn, setFocusOn] = useState<number | null>(null);
 
   const totalPct = Math.round((pctNeed + pctWant + pctSave) * 100);
@@ -149,13 +151,13 @@ export function PlanClient({
 
   // Category metadata: active categories, plus any archived one that still has a line here
   const catInfo = useMemo(() => {
-    const map = new Map<number, { name: string; kind: PlanKind; block: string }>();
-    for (const c of categories) map.set(c.id, { name: c.name, kind: c.kind, block: c.block });
+    const map = new Map<number, { name: string; kind: PlanKind; groupId: number }>();
+    for (const c of categories) map.set(c.id, { name: c.name, kind: c.kind, groupId: c.groupId });
     for (const l of lines) {
       map.set(l.categoryId, {
         name: l.categoryName,
         kind: l.categoryKind as PlanKind,
-        block: l.categoryBlock,
+        groupId: l.categoryGroupId,
       });
     }
     return map;
@@ -190,7 +192,7 @@ export function PlanClient({
 
   function addDraft(categoryId: number) {
     setDrafts((ds) => [...ds, { categoryId, raw: "0,00" }]);
-    setAddingBlock(null);
+    setAddingGroupId(null);
     setFocusOn(categoryId);
   }
 
@@ -344,24 +346,24 @@ export function PlanClient({
         </div>
       </div>
 
-      {/* Budget lines by block */}
-      {BLOCKS.map((block) => {
-        const blockDrafts = drafts.filter(
-          (d) => catInfo.get(d.categoryId)?.block === block.key
+      {/* Budget lines by group */}
+      {groups.map((group) => {
+        const groupDrafts = drafts.filter(
+          (d) => catInfo.get(d.categoryId)?.groupId === group.id
         );
-        const blockTotal = blockDrafts.reduce((s, d) => s + centsOf(d.raw), 0);
+        const groupTotal = groupDrafts.reduce((s, d) => s + centsOf(d.raw), 0);
         const available = categories.filter(
-          (c) => c.block === block.key && !usedIds.has(c.id)
+          (c) => c.groupId === group.id && !usedIds.has(c.id)
         );
 
         return (
-          <div key={block.key} style={{ marginBottom: 24 }}>
+          <div key={group.id} style={{ marginBottom: 24 }}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-              <h6 className="section-label">{block.label}</h6>
-              <span className="amount muted" style={{ fontSize: 12 }}>{formatAmount(blockTotal)}</span>
+              <h6 className="section-label">{group.name}</h6>
+              <span className="amount muted" style={{ fontSize: 12 }}>{formatAmount(groupTotal)}</span>
             </div>
 
-            {blockDrafts.length > 0 && (
+            {groupDrafts.length > 0 && (
               <table>
                 <thead>
                   <tr>
@@ -372,7 +374,7 @@ export function PlanClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {blockDrafts.map((draft) => {
+                  {groupDrafts.map((draft) => {
                     const info = catInfo.get(draft.categoryId);
                     return (
                       <tr key={draft.categoryId}>
@@ -413,13 +415,13 @@ export function PlanClient({
               </table>
             )}
 
-            {addingBlock === block.key ? (
+            {addingGroupId === group.id ? (
               <select
                 className="input"
                 autoFocus
                 defaultValue=""
                 onChange={(e) => e.target.value && addDraft(Number(e.target.value))}
-                onBlur={() => setAddingBlock(null)}
+                onBlur={() => setAddingGroupId(null)}
                 style={{ marginTop: 8, height: 28, fontSize: 13 }}
               >
                 <option value="" disabled>Choose a category…</option>
@@ -430,9 +432,9 @@ export function PlanClient({
             ) : (
               <button
                 className="btn btn-secondary"
-                onClick={() => setAddingBlock(block.key)}
+                onClick={() => setAddingGroupId(group.id)}
                 disabled={available.length === 0}
-                title={available.length === 0 ? "Every category in this block already has a line" : undefined}
+                title={available.length === 0 ? "Every category in this group already has a line" : undefined}
                 style={{ marginTop: 8, height: 28, padding: "0 10px", fontSize: 13, opacity: available.length === 0 ? 0.5 : 1 }}
               >
                 + Add line

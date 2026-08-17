@@ -4,16 +4,18 @@ import { useState, useEffect, useCallback, useTransition } from "react";
 import { CaptureForm } from "@/components/capture/capture-form";
 import { SessionList } from "@/components/capture/session-list";
 import type { SessionEntry } from "@/components/capture/session-list";
-import type { CaptureFormData, Category } from "@/lib/types";
+import type { CaptureFormData, Category, Group } from "@/lib/types";
 import { saveTransaction, removeTransaction } from "@/lib/actions/transactions";
 
 type PastDescription = { description: string; categoryId: number; count: number };
 
 export function CaptureClient({
   categories,
+  groups,
   pastDescriptions,
 }: {
   categories: Category[];
+  groups: Group[];
   pastDescriptions: PastDescription[];
 }) {
   const [entries, setEntries] = useState<SessionEntry[]>([]);
@@ -80,6 +82,7 @@ export function CaptureClient({
         <CaptureForm
           onSave={handleSave}
           categories={categories}
+          groups={groups}
           pastDescriptions={pastDescriptions}
           saving={isPending}
           serverError={serverError}

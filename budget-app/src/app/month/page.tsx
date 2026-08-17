@@ -4,16 +4,10 @@ import { ensureDb } from "@/lib/db/ensure-ready";
 import { getMonth, getBudgetLinesForMonth, getAvailableMonths } from "@/lib/db/queries/months";
 import { getTransactionsForMonth } from "@/lib/db/queries/transactions";
 import { getActiveCategories } from "@/lib/db/queries/categories";
+import { getActiveGroups } from "@/lib/db/queries/groups";
 import { formatAmount, formatMonth, formatDate } from "@/lib/format";
 import { BudgetBar } from "@/components/budget/budget-bar";
 import { MonthTransactionList } from "@/components/month/transaction-list";
-
-const BLOCKS = [
-  { key: "living",        label: "Living expenses" },
-  { key: "subscriptions", label: "Subscriptions" },
-  { key: "regular",       label: "Regular expenses" },
-  { key: "misc",          label: "Miscellaneous" },
-] as const;
 
 export default async function MonthPage({
   searchParams,
@@ -40,6 +34,7 @@ export default async function MonthPage({
   const lines      = getBudgetLinesForMonth(CURRENT_MONTH);
   const txs        = getTransactionsForMonth(CURRENT_MONTH);
   const categories = getActiveCategories();
+  const groups     = getActiveGroups();
 
   // Financials
   const saveAlloc     = Math.round(month.incomeActualCents * month.pctSave);
@@ -85,7 +80,7 @@ export default async function MonthPage({
           {[
             { label: "Income",    value: month.incomeActualCents },
             { label: "Spendable", value: spendable },
-            { label: "Remaining", value: remaining, warn: remaining < 0 },
+            { label: "Spent",     value: totalSpent, warn: remaining < 0 },
           ].map((item) => (
             <div key={item.label} style={{ background: "var(--color-bg)", padding: "14px 16px" }}>
               <div className="section-label" style={{ marginBottom: 4 }}>{item.label}</div>
@@ -129,19 +124,19 @@ export default async function MonthPage({
 
         <hr style={{ marginBottom: 24 }} />
 
-        {/* Budget lines by block */}
-        {BLOCKS.map((block) => {
-          const blockLines = lines.filter((l) => l.categoryBlock === block.key);
-          if (!blockLines.length) return null;
-          const blockPlanned = blockLines.reduce((s, l) => s + l.plannedCents, 0);
-          const blockSpent   = blockLines.reduce((s, l) => s + l.spentCents, 0);
+        {/* Budget lines by group */}
+        {groups.map((group) => {
+          const groupLines = lines.filter((l) => l.categoryGroupId === group.id);
+          if (!groupLines.length) return null;
+          const groupPlanned = groupLines.reduce((s, l) => s + l.plannedCents, 0);
+          const groupSpent   = groupLines.reduce((s, l) => s + l.spentCents, 0);
 
           return (
-            <div key={block.key} style={{ marginBottom: 28 }}>
+            <div key={group.id} style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-                <h6 className="section-label">{block.label}</h6>
+                <h6 className="section-label">{group.name}</h6>
                 <span className="amount muted" style={{ fontSize: 12 }}>
-                  {formatAmount(blockSpent)} / {formatAmount(blockPlanned)}
+                  {formatAmount(groupSpent)} / {formatAmount(groupPlanned)}
                 </span>
               </div>
               <table style={{ width: "100%" }}>
@@ -155,7 +150,7 @@ export default async function MonthPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {blockLines.map((line) => {
+                  {groupLines.map((line) => {
                     const diff  = line.plannedCents - line.spentCents;
                     const isOver = diff < 0;
                     return (
@@ -225,7 +220,7 @@ export default async function MonthPage({
       </div>
 
       {/* Right: Transactions */}
-      <MonthTransactionList transactions={txs} categories={categories} />
+      <MonthTransactionList transactions={txs} categories={categories} groups={groups} />
     </div>
   );
 }

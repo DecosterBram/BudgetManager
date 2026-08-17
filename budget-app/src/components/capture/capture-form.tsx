@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { parseAmount, today, parseRelativeDate } from "@/lib/format";
 import { DateField } from "@/components/ui/date-field";
-import type { Category, CaptureFormData, Confidence } from "@/lib/types";
+import type { Category, CaptureFormData, Confidence, Group } from "@/lib/types";
 
 type FieldErrors = {
   amount?: string;
@@ -52,13 +52,14 @@ function getSuggestions(description: string, past: PastDescription[]): PastDescr
 interface CaptureFormProps {
   onSave: (data: CaptureFormData) => void;
   categories: Category[];
+  groups: Group[];
   pastDescriptions: PastDescription[];
   saving?: boolean;
   /** Server-side rejection, shown above the Save button. */
   serverError?: string | null;
 }
 
-export function CaptureForm({ onSave, categories, pastDescriptions, saving = false, serverError = null }: CaptureFormProps) {
+export function CaptureForm({ onSave, categories, groups, pastDescriptions, saving = false, serverError = null }: CaptureFormProps) {
   const [amountStr, setAmountStr] = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState<number | null>(null);
@@ -79,9 +80,9 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
   const catRef = useRef<HTMLInputElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
 
-  // Focus amount on mount
+  // Focus description on mount
   useEffect(() => {
-    amountRef.current?.focus();
+    descRef.current?.focus();
   }, []);
 
   // Update category prediction when description changes
@@ -126,7 +127,7 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
     setCategoryId(s.categoryId);
     setConfidence("high");
     setShowSuggestions(false);
-    catRef.current?.focus();
+    amountRef.current?.focus();
   };
 
   const handleSave = useCallback(() => {
@@ -146,8 +147,8 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
 
     setErrors(next);
     if (Object.keys(next).length > 0) {
-      if (next.amount) amountRef.current?.focus();
-      else if (next.description) descRef.current?.focus();
+      if (next.description) descRef.current?.focus();
+      else if (next.amount) amountRef.current?.focus();
       else if (next.category) catRef.current?.focus();
       else dateRef.current?.focus();
       return;
@@ -168,7 +169,7 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
     setDateStr(today());
     setErrors({});
     setShowSuggestions(false);
-    amountRef.current?.focus();
+    descRef.current?.focus();
   }, [amountStr, description, categoryId, dateStr, onSave]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
@@ -203,26 +204,6 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
       onSubmit={(e) => { e.preventDefault(); handleSave(); }}
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
-      {/* Amount */}
-      <div>
-        <label className="section-label" style={{ display: "block", marginBottom: 4 }}>
-          Amount
-        </label>
-        <input
-          ref={amountRef}
-          className="input"
-          type="text"
-          inputMode="decimal"
-          placeholder="€ 0,00"
-          value={amountStr}
-          aria-invalid={!!errors.amount || undefined}
-          onChange={(e) => { setAmountStr(e.target.value); clearError("amount"); }}
-          onFocus={() => setShowSuggestions(false)}
-          style={{ fontVariantNumeric: "tabular-nums", ...errorBorder(!!errors.amount) }}
-        />
-        <FieldError message={errors.amount} />
-      </div>
-
       {/* Description with autocomplete */}
       <div style={{ position: "relative" }}>
         <label className="section-label" style={{ display: "block", marginBottom: 4 }}>
@@ -260,7 +241,9 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
               <button
                 key={s.description}
                 type="button"
-                onMouseDown={() => acceptSuggestion(s)}
+                // preventDefault: without it the button takes focus back on mouseup,
+                // stranding it here instead of on the amount field.
+                onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(s); }}
                 style={{
                   all: "unset",
                   display: "flex",
@@ -289,6 +272,26 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
             ))}
           </div>
         )}
+      </div>
+
+      {/* Amount */}
+      <div>
+        <label className="section-label" style={{ display: "block", marginBottom: 4 }}>
+          Amount
+        </label>
+        <input
+          ref={amountRef}
+          className="input"
+          type="text"
+          inputMode="decimal"
+          placeholder="€ 0,00"
+          value={amountStr}
+          aria-invalid={!!errors.amount || undefined}
+          onChange={(e) => { setAmountStr(e.target.value); clearError("amount"); }}
+          onFocus={() => setShowSuggestions(false)}
+          style={{ fontVariantNumeric: "tabular-nums", ...errorBorder(!!errors.amount) }}
+        />
+        <FieldError message={errors.amount} />
       </div>
 
       {/* Category */}
@@ -376,11 +379,11 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
                 No categories found
               </div>
             )}
-            {["living", "subscriptions", "regular", "misc"].map((block) => {
-              const blockCats = filteredCats.filter((c) => c.block === block);
-              if (!blockCats.length) return null;
+            {groups.map((group) => {
+              const groupCats = filteredCats.filter((c) => c.groupId === group.id);
+              if (!groupCats.length) return null;
               return (
-                <div key={block}>
+                <div key={group.id}>
                   <div
                     style={{
                       padding: "6px 10px 2px",
@@ -391,9 +394,9 @@ export function CaptureForm({ onSave, categories, pastDescriptions, saving = fal
                       color: "var(--i40)",
                     }}
                   >
-                    {block}
+                    {group.name}
                   </div>
-                  {blockCats.map((c) => (
+                  {groupCats.map((c) => (
                     <button
                       key={c.id}
                       type="button"

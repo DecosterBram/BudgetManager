@@ -5,20 +5,112 @@ import path from "path";
 
 const DB_PATH = process.env.BUDGET_DB_PATH ?? path.join(process.cwd(), "data", "budget.db");
 
+type Sqlite = InstanceType<typeof Database>;
+
+/** Rebuilds `categories` with a group_id FK. SQLite cannot drop a CHECK constraint,
+ *  so the table is recreated by the standard copy-drop-rename procedure. */
+function migration001CategoryGroups(sqlite: Sqlite) {
+  const countCategories = () =>
+    (sqlite.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }).n;
+
+  // foreign_keys cannot be toggled inside a transaction, so it goes around it.
+  sqlite.pragma("foreign_keys = OFF");
+  try {
+    const before = countCategories();
+    sqlite.exec("BEGIN");
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS category_groups (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL UNIQUE,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        archived_at TEXT
+      );
+
+      INSERT OR IGNORE INTO category_groups (name, sort_order) VALUES
+        ('Living expenses', 1), ('Subscriptions', 2), ('Regular expenses', 3), ('Miscellaneous', 4);
+
+      CREATE TABLE categories_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL UNIQUE,
+        kind        TEXT NOT NULL CHECK (kind IN ('need','want','save')),
+        group_id    INTEGER NOT NULL REFERENCES category_groups(id),
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        archived_at TEXT
+      );
+
+      INSERT INTO categories_new (id, name, kind, group_id, sort_order, archived_at)
+      SELECT c.id, c.name, c.kind, g.id, c.sort_order, c.archived_at
+      FROM categories c
+      JOIN category_groups g ON g.name = CASE c.block
+        WHEN 'living'        THEN 'Living expenses'
+        WHEN 'subscriptions' THEN 'Subscriptions'
+        WHEN 'regular'       THEN 'Regular expenses'
+        ELSE                      'Miscellaneous'
+      END;
+
+      DROP TABLE categories;
+      ALTER TABLE categories_new RENAME TO categories;
+
+      CREATE INDEX IF NOT EXISTS ix_cat_group ON categories(group_id);
+    `);
+
+    const after = countCategories();
+    if (after !== before) throw new Error(`migration 001: category count changed ${before} → ${after}`);
+    const orphans = sqlite.prepare("PRAGMA foreign_key_check").all();
+    if (orphans.length) throw new Error(`migration 001: ${orphans.length} orphaned rows after rebuild`);
+
+    sqlite.exec("COMMIT");
+  } catch (err) {
+    sqlite.exec("ROLLBACK");
+    throw err;
+  } finally {
+    sqlite.pragma("foreign_keys = ON");
+  }
+}
+
+const MIGRATIONS: { version: number; up: (sqlite: Sqlite) => void }[] = [
+  { version: 1, up: migration001CategoryGroups },
+];
+const LATEST_VERSION = MIGRATIONS.length;
+
+function applyMigrations(sqlite: Sqlite) {
+  const current = sqlite.pragma("user_version", { simple: true }) as number;
+  for (const migration of MIGRATIONS) {
+    if (migration.version > current) {
+      migration.up(sqlite);
+      sqlite.pragma(`user_version = ${migration.version}`);
+    }
+  }
+}
+
 export function migrateAndSeed() {
   const sqlite = new Database(DB_PATH);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
+  const isNewDatabase = !sqlite
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'categories'")
+    .get();
+
+  if (!isNewDatabase) applyMigrations(sqlite);
+
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS category_groups (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL UNIQUE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      archived_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS categories (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL UNIQUE,
       kind        TEXT NOT NULL CHECK (kind IN ('need','want','save')),
-      block       TEXT NOT NULL CHECK (block IN ('living','subscriptions','regular','misc')),
+      group_id    INTEGER NOT NULL REFERENCES category_groups(id),
       sort_order  INTEGER NOT NULL DEFAULT 0,
       archived_at TEXT
     );
+    CREATE INDEX IF NOT EXISTS ix_cat_group ON categories(group_id);
 
     CREATE TABLE IF NOT EXISTS months (
       month                   TEXT PRIMARY KEY,
@@ -62,8 +154,13 @@ export function migrateAndSeed() {
     );
   `);
 
+  if (isNewDatabase) sqlite.pragma(`user_version = ${LATEST_VERSION}`);
+
+  const insertGroup = sqlite.prepare(
+    "INSERT OR IGNORE INTO category_groups (name, sort_order) VALUES (?, ?)"
+  );
   const insertCat = sqlite.prepare(
-    "INSERT INTO categories (name, kind, block, sort_order) VALUES (?, ?, ?, ?)"
+    "INSERT INTO categories (name, kind, group_id, sort_order) VALUES (?, ?, ?, ?)"
   );
   const insertMonth = sqlite.prepare(
     `INSERT OR IGNORE INTO months (month, income_projected_cents, income_actual_cents, pct_need, pct_want, pct_save)
@@ -84,6 +181,19 @@ export function migrateAndSeed() {
   const count = (sqlite.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
 
   const seedAll = sqlite.transaction(() => {
+    const groupNames = ["Living expenses", "Subscriptions", "Regular expenses", "Miscellaneous"];
+    groupNames.forEach((name, i) => insertGroup.run(name, i + 1));
+    const groupId = Object.fromEntries(
+      (sqlite.prepare("SELECT id, name FROM category_groups").all() as { id: number; name: string }[])
+        .map((g) => [g.name, g.id])
+    ) as Record<string, number>;
+    const GROUP_OF = {
+      living: groupId["Living expenses"],
+      subscriptions: groupId["Subscriptions"],
+      regular: groupId["Regular expenses"],
+      misc: groupId["Miscellaneous"],
+    } as const;
+
     // Categories
     const cats = [
       ["Rent",                "need", "living",        1],
@@ -107,7 +217,7 @@ export function migrateAndSeed() {
       ["Other",               "need", "misc",          3],
     ] as const;
     for (const [name, kind, block, order] of cats) {
-      insertCat.run(name, kind, block, order);
+      insertCat.run(name, kind, GROUP_OF[block], order);
     }
 
     // Month

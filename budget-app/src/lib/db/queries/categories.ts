@@ -54,17 +54,19 @@ export function deleteMerchantRule(id: number) {
 export function insertCategory(data: {
   name: string;
   kind: "need" | "want" | "save";
-  block: "living" | "subscriptions" | "regular" | "misc";
+  groupId: number;
 }) {
   const max = db
     .select({ value: sql<number>`COALESCE(MAX(${categories.sortOrder}), 0)` })
     .from(categories)
+    .where(eq(categories.groupId, data.groupId))
     .get();
 
   return db
     .insert(categories)
     .values({ ...data, sortOrder: (max?.value ?? 0) + 1 })
-    .run();
+    .returning({ id: categories.id })
+    .get();
 }
 
 // Categories are archived, never deleted — history depends on them.

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { ensureDb } from "@/lib/db/ensure-ready";
 import { getMonth, getBudgetLinesForMonth, getAvailableMonths } from "@/lib/db/queries/months";
 import { getActiveCategories } from "@/lib/db/queries/categories";
+import { getActiveGroups } from "@/lib/db/queries/groups";
 import { nextMonth, currentMonth } from "@/lib/format";
 import { PlanClient } from "@/components/plan/plan-client";
 
@@ -31,6 +32,7 @@ export default async function PlanPage({
 
   const lines = getBudgetLinesForMonth(selected);
   const categories = getActiveCategories();
+  const groups = getActiveGroups();
   const next = nextMonth(selected);
 
   return (
@@ -39,6 +41,7 @@ export default async function PlanPage({
       month={month}
       lines={lines}
       categories={categories}
+      groups={groups}
       nextMonth={next}
       nextMonthExists={Boolean(getMonth(next))}
     />

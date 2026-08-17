@@ -11,9 +11,9 @@ import { today } from "@/lib/format";
 import { z } from "zod/v4";
 
 const CategorySchema = z.object({
-  name:  z.string().trim().min(1, "Name is required").max(40),
-  kind:  z.enum(["need", "want", "save"]),
-  block: z.enum(["living", "subscriptions", "regular", "misc"]),
+  name:    z.string().trim().min(1, "Name is required").max(40),
+  kind:    z.enum(["need", "want", "save"]),
+  groupId: z.number().int().positive(),
 });
 
 const IdSchema = z.number().int().positive();

@@ -1,10 +1,17 @@
 import { sqliteTable, integer, text, real, unique } from "drizzle-orm/sqlite-core";
 
+export const categoryGroups = sqliteTable("category_groups", {
+  id:         integer("id").primaryKey({ autoIncrement: true }),
+  name:       text("name").notNull().unique(),
+  sortOrder:  integer("sort_order").notNull().default(0),
+  archivedAt: text("archived_at"),
+});
+
 export const categories = sqliteTable("categories", {
   id:         integer("id").primaryKey({ autoIncrement: true }),
   name:       text("name").notNull().unique(),
   kind:       text("kind", { enum: ["need", "want", "save"] }).notNull(),
-  block:      text("block", { enum: ["living", "subscriptions", "regular", "misc"] }).notNull(),
+  groupId:    integer("group_id").notNull().references(() => categoryGroups.id),
   sortOrder:  integer("sort_order").notNull().default(0),
   archivedAt: text("archived_at"),
 });

@@ -46,7 +46,7 @@ export function getBudgetLinesForMonth(month: string) {
       plannedCents: budgetLines.plannedCents,
       categoryName:  categories.name,
       categoryKind:  categories.kind,
-      categoryBlock: categories.block,
+      categoryGroupId: categories.groupId,
       categoryOrder: categories.sortOrder,
       spentCents: sql<number>`
         COALESCE((

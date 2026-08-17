@@ -10,14 +10,20 @@ import {
   removeMerchantRule,
 } from "@/lib/actions/categories";
 
-const BLOCKS = ["living", "subscriptions", "regular", "misc"] as const;
 const KINDS = ["need", "want", "save"] as const;
+
+type Group = {
+  id: number;
+  name: string;
+  sortOrder: number;
+  archivedAt: string | null;
+};
 
 type Category = {
   id: number;
   name: string;
   kind: (typeof KINDS)[number];
-  block: (typeof BLOCKS)[number];
+  groupId: number;
   sortOrder: number;
   archivedAt: string | null;
 };
@@ -36,9 +42,11 @@ type TabKey = "categories" | "rules" | "danger";
 export function SettingsClient({
   categories,
   rules,
+  groups,
 }: {
   categories: Category[];
   rules: Rule[];
+  groups: Group[];
 }) {
   const [tab, setTab] = useState<TabKey>("categories");
   const [showArchived, setShowArchived] = useState(false);
@@ -85,6 +93,7 @@ export function SettingsClient({
         <CategoriesTab
           active={active}
           archived={archived}
+          groups={groups}
           showArchived={showArchived}
           onToggleArchived={() => setShowArchived((v) => !v)}
         />
@@ -98,11 +107,13 @@ export function SettingsClient({
 function CategoriesTab({
   active,
   archived,
+  groups,
   showArchived,
   onToggleArchived,
 }: {
   active: Category[];
   archived: Category[];
+  groups: Group[];
   showArchived: boolean;
   onToggleArchived: () => void;
 }) {
@@ -133,15 +144,15 @@ function CategoriesTab({
         </div>
       </div>
 
-      {adding && <NewCategoryForm onDone={() => setAdding(false)} />}
+      {adding && <NewCategoryForm groups={groups} onDone={() => setAdding(false)} />}
 
-      {BLOCKS.map((block) => {
-        const cats = active.filter((c) => c.block === block);
+      {groups.map((group) => {
+        const cats = active.filter((c) => c.groupId === group.id);
         if (!cats.length) return null;
         return (
-          <div key={block} style={{ marginBottom: 24 }}>
+          <div key={group.id} style={{ marginBottom: 24 }}>
             <h6 className="section-label" style={{ marginBottom: 8 }}>
-              {block}
+              {group.name}
             </h6>
             <table>
               <thead>
@@ -149,13 +160,13 @@ function CategoriesTab({
                   <th style={{ width: 32 }}>#</th>
                   <th>Name</th>
                   <th style={{ width: 80 }}>Kind</th>
-                  <th style={{ width: 100 }}>Block</th>
+                  <th style={{ width: 100 }}>Group</th>
                   <th style={{ width: 80 }} />
                 </tr>
               </thead>
               <tbody>
                 {cats.map((cat) => (
-                  <CategoryRow key={cat.id} cat={cat} />
+                  <CategoryRow key={cat.id} cat={cat} groups={groups} />
                 ))}
               </tbody>
             </table>
@@ -173,13 +184,13 @@ function CategoriesTab({
               <tr>
                 <th>Name</th>
                 <th style={{ width: 80 }}>Kind</th>
-                <th style={{ width: 100 }}>Block</th>
+                <th style={{ width: 100 }}>Group</th>
                 <th style={{ width: 100 }} />
               </tr>
             </thead>
             <tbody>
               {archived.map((cat) => (
-                <ArchivedRow key={cat.id} cat={cat} />
+                <ArchivedRow key={cat.id} cat={cat} groups={groups} />
               ))}
             </tbody>
           </table>
@@ -189,17 +200,17 @@ function CategoriesTab({
   );
 }
 
-function NewCategoryForm({ onDone }: { onDone: () => void }) {
+function NewCategoryForm({ groups, onDone }: { groups: Group[]; onDone: () => void }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<(typeof KINDS)[number]>("need");
-  const [block, setBlock] = useState<(typeof BLOCKS)[number]>("living");
+  const [groupId, setGroupId] = useState<number>(groups[0]?.id ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = await createCategory({ name, kind, block });
+      const result = await createCategory({ name, kind, groupId });
       if (result.ok) onDone();
       else setError(result.error);
     });
@@ -240,11 +251,11 @@ function NewCategoryForm({ onDone }: { onDone: () => void }) {
       </select>
       <select
         className="input"
-        value={block}
-        onChange={(e) => setBlock(e.target.value as (typeof BLOCKS)[number])}
+        value={groupId}
+        onChange={(e) => setGroupId(Number(e.target.value))}
         style={{ height: 30, fontSize: 13 }}
       >
-        {BLOCKS.map((b) => <option key={b} value={b}>{b}</option>)}
+        {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
       </select>
       <button
         className="btn btn-primary"
@@ -258,8 +269,9 @@ function NewCategoryForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function CategoryRow({ cat }: { cat: Category }) {
+function CategoryRow({ cat, groups }: { cat: Category; groups: Group[] }) {
   const [isPending, startTransition] = useTransition();
+  const groupName = groups.find((g) => g.id === cat.groupId)?.name ?? "";
 
   return (
     <tr style={{ opacity: isPending ? 0.5 : 1 }}>
@@ -270,7 +282,7 @@ function CategoryRow({ cat }: { cat: Category }) {
       <td>
         <span className={`badge badge-${cat.kind}`}>{cat.kind}</span>
       </td>
-      <td style={{ fontSize: 13, color: "var(--i55)" }}>{cat.block}</td>
+      <td style={{ fontSize: 13, color: "var(--i55)" }}>{groupName}</td>
       <td>
         <button
           onClick={() => startTransition(async () => { await archiveCategory(cat.id); })}
@@ -289,14 +301,15 @@ function CategoryRow({ cat }: { cat: Category }) {
   );
 }
 
-function ArchivedRow({ cat }: { cat: Category }) {
+function ArchivedRow({ cat, groups }: { cat: Category; groups: Group[] }) {
   const [isPending, startTransition] = useTransition();
+  const groupName = groups.find((g) => g.id === cat.groupId)?.name ?? "";
 
   return (
     <tr style={{ opacity: isPending ? 0.3 : 0.5 }}>
       <td style={{ fontSize: 14 }}>{cat.name}</td>
       <td><span className={`badge badge-${cat.kind}`}>{cat.kind}</span></td>
-      <td style={{ fontSize: 13, color: "var(--i55)" }}>{cat.block}</td>
+      <td style={{ fontSize: 13, color: "var(--i55)" }}>{groupName}</td>
       <td>
         <button
           onClick={() => startTransition(async () => { await restoreCategory(cat.id); })}

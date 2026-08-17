@@ -1,13 +1,19 @@
 export type Kind = "need" | "want" | "save";
-export type Block = "living" | "subscriptions" | "regular" | "misc";
 export type DatePrecision = "day" | "month";
 export type EntrySource = "manual" | "import";
+
+export interface Group {
+  id: number;
+  name: string;
+  sortOrder: number;
+  archivedAt: string | null;
+}
 
 export interface Category {
   id: number;
   name: string;
   kind: Kind;
-  block: Block;
+  groupId: number;
   sortOrder: number;
   archivedAt: string | null;
 }

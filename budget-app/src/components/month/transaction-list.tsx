@@ -16,11 +16,10 @@ type Tx = {
   categoryKind: string;
 };
 
-type Cat = { id: number; name: string; kind: string; block: string; archivedAt: string | null };
+type Cat = { id: number; name: string; kind: string; groupId: number; archivedAt: string | null };
+type Group = { id: number; name: string; sortOrder: number; archivedAt: string | null };
 
-const BLOCKS = ["living", "subscriptions", "regular", "misc"] as const;
-
-function EditRow({ tx, categories, onDone }: { tx: Tx; categories: Cat[]; onDone: () => void }) {
+function EditRow({ tx, categories, groups, onDone }: { tx: Tx; categories: Cat[]; groups: Group[]; onDone: () => void }) {
   const [dateStr, setDateStr] = useState(tx.occurredOn);
   const [description, setDescription] = useState(tx.description);
   const [categoryId, setCategoryId] = useState(tx.categoryId);
@@ -100,11 +99,11 @@ function EditRow({ tx, categories, onDone }: { tx: Tx; categories: Cat[]; onDone
         onChange={(e) => setCategoryId(Number(e.target.value))}
         style={{ height: 28, fontSize: 13, padding: "0 4px" }}
       >
-        {BLOCKS.map((block) => {
-          const cats = activeCats.filter((c) => c.block === block);
+        {groups.map((group) => {
+          const cats = activeCats.filter((c) => c.groupId === group.id);
           if (!cats.length) return null;
           return (
-            <optgroup key={block} label={block}>
+            <optgroup key={group.id} label={group.name}>
               {cats.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -157,14 +156,14 @@ function EditRow({ tx, categories, onDone }: { tx: Tx; categories: Cat[]; onDone
   );
 }
 
-function TxRow({ tx, categories }: { tx: Tx; categories: Cat[] }) {
+function TxRow({ tx, categories, groups }: { tx: Tx; categories: Cat[]; groups: Group[] }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   if (editing) {
-    return <EditRow tx={tx} categories={categories} onDone={() => setEditing(false)} />;
+    return <EditRow tx={tx} categories={categories} groups={groups} onDone={() => setEditing(false)} />;
   }
 
   const handleDelete = () => {
@@ -258,9 +257,11 @@ function TxRow({ tx, categories }: { tx: Tx; categories: Cat[] }) {
 export function MonthTransactionList({
   transactions,
   categories,
+  groups,
 }: {
   transactions: Tx[];
   categories: Cat[];
+  groups: Group[];
 }) {
   const [filter, setFilter] = useState("");
 
@@ -272,11 +273,11 @@ export function MonthTransactionList({
       )
     : transactions;
 
-  const groups: Record<string, Tx[]> = {};
+  const byDay: Record<string, Tx[]> = {};
   for (const tx of filtered) {
-    (groups[tx.occurredOn] ??= []).push(tx);
+    (byDay[tx.occurredOn] ??= []).push(tx);
   }
-  const days = Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+  const days = Object.entries(byDay).sort(([a], [b]) => b.localeCompare(a));
 
   return (
     <div style={{ padding: "28px 24px", overflowY: "auto" }}>
@@ -298,7 +299,7 @@ export function MonthTransactionList({
             {formatDate(date)}
           </div>
           {txs.map((tx) => (
-            <TxRow key={tx.id} tx={tx} categories={categories} />
+            <TxRow key={tx.id} tx={tx} categories={categories} groups={groups} />
           ))}
           <div className="amount" style={{ textAlign: "right", fontSize: 12, color: "var(--i55)", padding: "4px 8px 0" }}>
             {formatAmount(txs.reduce((s, t) => s + t.amountCents, 0))}

@@ -17,7 +17,7 @@ export function getTransactionsForMonth(month: string) {
       createdAt:     transactions.createdAt,
       categoryName:  categories.name,
       categoryKind:  categories.kind,
-      categoryBlock: categories.block,
+      categoryGroupId: categories.groupId,
     })
     .from(transactions)
     .innerJoin(categories, eq(transactions.categoryId, categories.id))
