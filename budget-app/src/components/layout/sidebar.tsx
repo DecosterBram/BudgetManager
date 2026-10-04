@@ -20,6 +20,14 @@ const SHORTCUTS = [
   { key: "⌘Z", label: "Undo" },
 ];
 
+// The selected month lives only in the URL, so tab switches have to carry it along.
+// Read at click time rather than via useSearchParams: this component sits in the
+// layout, and a prerendered page (/goals) would need a Suspense boundary for the hook.
+function withMonth(href: string) {
+  const month = new URLSearchParams(window.location.search).get("month");
+  return month ? `${href}?month=${month}` : href;
+}
+
 function MonthPickerClient({ availableMonths }: { availableMonths: string[] }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -107,7 +115,7 @@ export function Sidebar({ theme, onThemeToggle, availableMonths }: SidebarProps)
         const item = NAV_ITEMS.find((n) => n.key === e.key);
         if (item) {
           e.preventDefault();
-          router.push(item.href);
+          router.push(withMonth(item.href));
         }
         return;
       }
@@ -120,7 +128,7 @@ export function Sidebar({ theme, onThemeToggle, availableMonths }: SidebarProps)
 
       if (e.key === "n") {
         e.preventDefault();
-        router.push("/capture");
+        router.push(withMonth("/capture"));
       }
     }
 
@@ -173,7 +181,7 @@ export function Sidebar({ theme, onThemeToggle, availableMonths }: SidebarProps)
           return (
             <button
               key={item.key}
-              onClick={() => router.push(item.href)}
+              onClick={() => router.push(withMonth(item.href))}
               style={{
                 all: "unset",
                 display: "flex",
